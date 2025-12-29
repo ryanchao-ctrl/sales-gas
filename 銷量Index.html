@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>銷售數據中心</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+  
+  <style>
+    body { background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    
+    /* === 明顯的 Loading 介面 === */
+    #loading {
+      display: none; /* 預設隱藏 */
+      position: fixed;
+      inset: 0;
+      background-color: rgba(0, 0, 0, 0.6); /* 深色背景 */
+      backdrop-filter: blur(3px);
+      z-index: 10000;
+      justify-content: center;
+      align-items: center;
+    }
+    #loading.active {
+      display: flex;
+    }
+    .loading-box {
+      background: white;
+      padding: 2.5rem;
+      border-radius: 1rem;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      text-align: center;
+      max-width: 90%;
+      width: 320px;
+    }
+    .loader {
+      border: 4px solid #e2e8f0;
+      border-radius: 50%;
+      border-top: 4px solid #3b82f6;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1.5rem auto;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Button Groups */
+    .btn-group-btn { transition: all 0.2s; }
+    .btn-group-btn.active { background-color: #2563eb; color: white; border-color: #2563eb; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2); }
+    
+    /* Group Button (Flexbox fixed) */
+    .group-btn { 
+      transition: all 0.2s; 
+      border: 1px solid #e2e8f0; 
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      white-space: nowrap;
+      background-color: white;
+      color: #64748b;
+      cursor: pointer;
+    }
+    .group-btn:hover { background-color: #f1f5f9; }
+    .group-btn.active { background-color: #eff6ff; color: #1d4ed8; border-color: #3b82f6; font-weight: 600; }
+    
+    .checkbox-icon {
+      width: 16px; height: 16px; 
+      border: 2px solid #cbd5e1; 
+      border-radius: 4px; 
+      flex-shrink: 0;
+      transition: all 0.2s;
+      background-color: white;
+      position: relative;
+    }
+    .group-btn.active .checkbox-icon {
+      background-color: #3b82f6; 
+      border-color: #3b82f6;
+    }
+    .group-btn.active .checkbox-icon::after {
+      content: '';
+      position: absolute;
+      left: 4px; top: 1px;
+      width: 5px; height: 9px;
+      border: solid white;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+
+    /* Sub-channel Chips */
+    .chip-btn { 
+      font-size: 0.75rem; 
+      padding: 4px 10px; 
+      border-radius: 9999px; 
+      border: 1px solid #cbd5e1; 
+      color: #64748b; 
+      background: white; 
+      transition: all 0.15s; 
+      cursor: pointer; 
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .chip-btn:hover { border-color: #94a3b8; color: #334155; }
+    .chip-btn.active { background-color: #2563eb; border-color: #2563eb; color: white; font-weight: 600; padding-right: 8px; }
+    .chip-btn.active::before { content: '✓'; font-weight: 800; font-size: 10px; }
+
+    .alert-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed #f1f5f9; font-size: 0.85rem; }
+    .alert-item:last-child { border-bottom: none; }
+    .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); padding: 1.25rem; }
+
+    /* Drill-down Table */
+    .row-group { background-color: #ffffff; cursor: pointer; }
+    .row-group:hover { background-color: #f8fafc; }
+    .row-sub { background-color: #f1f5f9; display: none; }
+    .row-sub.open { display: table-row; }
+    .row-prod { background-color: #ffffff; display: none; }
+    .row-prod.open { display: table-row; }
+    .indent-1 { padding-left: 2rem !important; }
+    .indent-2 { padding-left: 4rem !important; }
+    .chevron { transition: transform 0.2s; display: inline-block; width: 16px; text-align: center; }
+    .rotate-90 { transform: rotate(90deg); }
+  </style>
+</head>
+<body class="text-slate-800 pb-12">
+
+  <!-- Loading Overlay -->
+  <div id="loading">
+    <div class="loading-box">
+      <div id="loading-spinner" class="loader"></div>
+      <div id="loading-text" class="text-xl font-bold text-slate-700">數據更新中...</div>
+      <div id="loading-subtext" class="text-sm text-slate-500 mt-2">正在處理銷售數據與分析</div>
+      <button id="loading-retry" onclick="location.reload()" class="hidden mt-4 px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 w-full font-bold">
+        重新整理頁面
+      </button>
+    </div>
+  </div>
+
+  <div class="max-w-[1600px] mx-auto p-4 md:p-6 space-y-6">
+    
+    <!-- Control Panel -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 sticky top-0 z-40 transition-all">
+      <div class="flex flex-col xl:flex-row justify-between items-start gap-4">
+        
+        <!-- Left: Date -->
+        <div class="flex flex-col gap-3 w-full xl:w-auto">
+          <div class="flex items-center gap-2">
+            <div class="bg-blue-600 text-white p-2 rounded-lg shadow-sm">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z"/></svg>
+            </div>
+            <h1 class="font-bold text-xl tracking-tight text-slate-800">銷售數據中心</h1>
+          </div>
+
+          <div class="flex flex-wrap gap-2 items-center">
+            <div class="flex bg-slate-100 rounded-lg p-1 gap-1">
+              <button onclick="setDate('thisMonth')" class="date-btn btn-group-btn px-3 py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900 active">當月</button>
+              <button onclick="setDate('lastMonth')" class="date-btn btn-group-btn px-3 py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900">上月</button>
+              <button onclick="setDate('last7')" class="date-btn btn-group-btn px-3 py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900">近 7 日</button>
+              <button onclick="setDate('last90')" class="date-btn btn-group-btn px-3 py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900">近 90 天</button>
+              <button onclick="setDate('ytd')" class="date-btn btn-group-btn px-3 py-1 text-xs font-medium rounded text-slate-600 hover:text-slate-900">今年</button>
+            </div>
+            <div class="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 ml-2">
+              <input type="date" id="startDate" class="bg-transparent text-xs font-mono border-none focus:ring-0 text-slate-600 w-24">
+              <span class="text-slate-300 text-xs">➜</span>
+              <input type="date" id="endDate" class="bg-transparent text-xs font-mono border-none focus:ring-0 text-slate-600 w-24">
+              <button onclick="loadData()" class="bg-blue-50 text-blue-600 hover:bg-blue-100 p-1 rounded transition-colors" title="重新整理">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Multi-select Groups -->
+        <div class="flex flex-col gap-2 w-full xl:w-auto items-start xl:items-end">
+          <div class="flex flex-wrap gap-2">
+            <button onclick="toggleGroup('All')" id="btn-All" class="group-btn text-xs font-bold rounded active">
+              <span class="checkbox-icon"></span> 全部通路
+            </button>
+            <button onclick="toggleGroup('電商群組')" id="btn-EC" class="group-btn text-xs font-bold rounded">
+              <span class="checkbox-icon"></span> 電商群組
+            </button>
+            <button onclick="toggleGroup('門市群組')" id="btn-Retail" class="group-btn text-xs font-bold rounded">
+              <span class="checkbox-icon"></span> 門市群組
+            </button>
+            <button onclick="toggleGroup('經銷群組')" id="btn-Dist" class="group-btn text-xs font-bold rounded">
+              <span class="checkbox-icon"></span> 經銷群組
+            </button>
+            <button onclick="toggleGroup('其他群組')" id="btn-Other" class="group-btn text-xs font-bold rounded">
+              <span class="checkbox-icon"></span> 其他群組
+            </button>
+          </div>
+          <!-- Sub-channels Chips Container -->
+          <div id="subChannelContainer" class="flex flex-wrap gap-2 justify-end min-h-[24px] max-w-3xl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 1: KPI Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="card border-l-4 border-l-blue-500 hover:-translate-y-1 transition-transform">
+        <div class="text-xs text-slate-400 font-bold uppercase mb-1 tracking-wide">總營收 (Revenue)</div>
+        <div class="text-2xl font-extrabold text-slate-800 tracking-tight" id="kpi-rev">---</div>
+        <div class="flex items-center mt-2" id="kpi-rev-grow"><span class="text-xs text-slate-300">---</span></div>
+      </div>
+      <div class="card border-l-4 border-l-emerald-500 hover:-translate-y-1 transition-transform">
+        <div class="text-xs text-slate-400 font-bold uppercase mb-1 tracking-wide">總銷量 (Quantity)</div>
+        <div class="text-2xl font-extrabold text-slate-800 tracking-tight" id="kpi-qty">---</div>
+        <div class="flex items-center mt-2" id="kpi-qty-grow"><span class="text-xs text-slate-300">---</span></div>
+      </div>
+      <div class="card border-l-4 border-l-purple-500 hover:-translate-y-1 transition-transform">
+        <div class="text-xs text-slate-400 font-bold uppercase mb-1 tracking-wide">平均客單 (ASP)</div>
+        <div class="text-2xl font-extrabold text-slate-800 tracking-tight" id="kpi-asp">---</div>
+        <div class="flex items-center mt-2" id="kpi-asp-grow"><span class="text-xs text-slate-300">---</span></div>
+      </div>
+      <div class="card border-l-4 border-l-amber-500 flex flex-col justify-center">
+        <div class="text-xs text-slate-400 font-bold uppercase mb-1 tracking-wide">目前數據區間</div>
+        <div class="text-sm font-bold text-slate-700 font-mono mt-1" id="period-display">---</div>
+        <div class="text-xs text-slate-400 mt-1">對比: 前一等長週期</div>
+      </div>
+    </div>
+
+    <!-- Row 2: Group Performance Overview -->
+    <div class="card">
+      <h3 class="text-sm font-bold text-slate-700 mb-3 flex items-center">
+        <span class="w-1 h-4 bg-slate-800 mr-2 rounded-full"></span>群組業績總覽 (點擊展開明細)
+      </h3>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left border-collapse">
+          <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-100">
+            <tr>
+              <th class="px-4 py-2 font-semibold w-1/3">名稱 / 代碼</th>
+              <th class="px-4 py-2 text-right font-semibold">營收</th>
+              <th class="px-4 py-2 text-right font-semibold">銷量</th>
+              <th class="px-4 py-2 text-right font-semibold">ASP</th>
+              <th class="px-4 py-2 text-center font-semibold">營收貢獻</th>
+            </tr>
+          </thead>
+          <tbody id="groupSummaryBody" class="text-slate-700">
+            <!-- Data -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Row 3: Alerts -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="card border-t-4 border-t-rose-500">
+        <h4 class="text-xs font-bold text-rose-600 uppercase mb-3 flex items-center">
+          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"/></svg>
+          嚴重衰退 (Top 5)
+        </h4>
+        <div id="alert-churn" class="space-y-1"></div>
+      </div>
+      <div class="card border-t-4 border-t-orange-500">
+        <h4 class="text-xs font-bold text-orange-600 uppercase mb-3 flex items-center">
+          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          高流速品斷貨 (Top20 異常)
+        </h4>
+        <div id="alert-stockout" class="space-y-1"></div>
+      </div>
+      <div class="card border-t-4 border-t-yellow-500">
+        <h4 class="text-xs font-bold text-yellow-600 uppercase mb-3 flex items-center">
+          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          獲利警告 (ASP跌>20%)
+        </h4>
+        <div id="alert-profit" class="space-y-1"></div>
+      </div>
+      <div class="card border-t-4 border-t-blue-500">
+        <h4 class="text-xs font-bold text-blue-600 uppercase mb-3 flex items-center">
+          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+          潛力新品 (近7日飆升)
+        </h4>
+        <div id="alert-potential" class="space-y-1"></div>
+      </div>
+    </div>
+
+    <!-- Row 4: Trend -->
+    <div class="card h-[400px] relative flex flex-col">
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-sm font-bold text-slate-700 flex items-center">
+          <span class="w-1 h-4 bg-slate-800 mr-2 rounded-full"></span>每日營收趨勢 (Top 5)
+        </h3>
+        <div class="flex bg-slate-100 rounded p-0.5">
+          <button onclick="setTrendInterval('day')" id="trend-day" class="trend-toggle px-3 py-0.5 text-[10px] font-bold rounded bg-white shadow-sm text-blue-600">日</button>
+          <button onclick="setTrendInterval('week')" id="trend-week" class="trend-toggle px-3 py-0.5 text-[10px] font-bold rounded text-slate-400 hover:text-slate-600">週</button>
+          <button onclick="setTrendInterval('month')" id="trend-month" class="trend-toggle px-3 py-0.5 text-[10px] font-bold rounded text-slate-400 hover:text-slate-600">月</button>
+        </div>
+      </div>
+      <div class="flex-1 w-full min-h-0">
+        <canvas id="trendChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Row 5: Deep Analysis -->
+    <div class="grid grid-cols-1 lg:grid-cols-10 gap-6">
+      <div class="lg:col-span-6 card h-[500px] flex flex-col">
+        <div class="flex justify-between items-start mb-2">
+          <div>
+            <h3 class="text-sm font-bold text-slate-700 flex items-center">
+              <span class="w-1 h-4 bg-slate-800 mr-2 rounded-full"></span>機會與風險矩陣
+            </h3>
+            <p class="text-[10px] text-slate-400 mt-1 pl-3">顯示重點: 營收 Top 10 或 成長 > 50%</p>
+          </div>
+        </div>
+        <div class="flex-1 w-full min-h-0">
+          <canvas id="matrixChart"></canvas>
+        </div>
+      </div>
+
+      <div class="lg:col-span-4 card h-[500px] flex flex-col">
+        <div class="flex justify-between items-start mb-2">
+          <div>
+            <h3 class="text-sm font-bold text-slate-700 flex items-center">
+              <span class="w-1 h-4 bg-slate-800 mr-2 rounded-full"></span>重點產品排行 (Pareto)
+            </h3>
+            <p class="text-[10px] text-slate-400 mt-1 pl-3">Top 20 營收貢獻</p>
+          </div>
+        </div>
+        <div class="flex-1 w-full min-h-0">
+          <canvas id="paretoChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="mt-8 pt-4 border-t border-slate-200 text-[11px] text-slate-400 space-y-1">
+      <div class="flex justify-between mb-2">
+        <span class="font-bold text-slate-600">資料處理規則與定義</span>
+        <span id="updateTime">更新時間: ---</span>
+      </div>
+      <p>• <span class="font-semibold text-slate-500">嚴格資料清洗:</span> 排除產品名稱包含「贈品, 報廢, 轉借出單, 轉廣告費, 維修派工單-消費者, 維修收入, 運費收入」之紀錄；排除含稅金額 <= 0 之訂單。</p>
+      <p>• <span class="font-semibold text-slate-500">高流速品斷貨預警:</span> 篩選該區間內總銷量 Top 20 產品中，最近 3 日銷量為 0 者。</p>
+    </div>
+
+  </div>
+
+  <script>
+    // --- State ---
+    let selectedGroups = new Set(['All']);
+    let selectedSubChannels = new Set();
+    let channelConfig = {};
+    let rawTrendData = {}; 
+    let chartInstances = { trend: null, matrix: null, pareto: null };
+    let loadingTimer = null;
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', () => {
+      Chart.register(ChartDataLabels);
+      
+      // Load Config First
+      google.script.run.withSuccessHandler(config => {
+        channelConfig = config;
+        setDate('thisMonth'); // Load data after config
+      }).withFailureHandler(err => {
+        showLoadingError("初始化失敗: " + err.message);
+      }).getChannelConfig();
+    });
+
+    // --- UI Helpers ---
+    function showLoading() {
+      const el = document.getElementById('loading');
+      const text = document.getElementById('loading-text');
+      const sub = document.getElementById('loading-subtext');
+      const spinner = document.getElementById('loading-spinner');
+      const retry = document.getElementById('loading-retry');
+      
+      el.classList.add('active');
+      text.innerText = "數據更新中...";
+      sub.innerText = "正在處理銷售數據與分析";
+      text.classList.remove('text-red-600');
+      text.classList.add('text-slate-700');
+      spinner.style.display = 'block';
+      retry.classList.add('hidden');
+
+      // Safety Timeout (30s)
+      if(loadingTimer) clearTimeout(loadingTimer);
+      loadingTimer = setTimeout(() => {
+        showLoadingError("請求超時 (Timeout)\n資料量可能過大，請縮小日期範圍或檢查網路。");
+      }, 30000);
+    }
+
+    function hideLoading() {
+      document.getElementById('loading').classList.remove('active');
+      if(loadingTimer) clearTimeout(loadingTimer);
+    }
+
+    function showLoadingError(msg) {
+      if(loadingTimer) clearTimeout(loadingTimer);
+      const text = document.getElementById('loading-text');
+      const sub = document.getElementById('loading-subtext');
+      const spinner = document.getElementById('loading-spinner');
+      const retry = document.getElementById('loading-retry');
+      
+      text.innerText = "⚠️ 發生錯誤";
+      text.classList.remove('text-slate-700');
+      text.classList.add('text-red-600');
+      sub.innerText = msg;
+      spinner.style.display = 'none';
+      retry.classList.remove('hidden');
+      document.getElementById('loading').classList.add('active');
+    }
+
+    // --- Date Logic ---
+    function setDate(type) {
+      document.querySelectorAll('.date-btn').forEach(b => b.classList.remove('active', 'bg-slate-800', 'text-white'));
+      event.target.classList.add('active', 'bg-slate-800', 'text-white');
+
+      const today = new Date();
+      let start = new Date();
+      let end = new Date();
+
+      switch(type) {
+        case 'thisMonth':
+          start = new Date(today.getFullYear(), today.getMonth(), 1);
+          break;
+        case 'lastMonth':
+          start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+          end = new Date(today.getFullYear(), today.getMonth(), 0);
+          break;
+        case 'last7':
+          start.setDate(today.getDate() - 6);
+          break;
+        case 'last90':
+          start.setDate(today.getDate() - 89);
+          break;
+        case 'ytd':
+          start = new Date(today.getFullYear(), 0, 1);
+          break;
+      }
+
+      const toLocalISO = (d) => {
+        const offset = d.getTimezoneOffset() * 60000;
+        return new Date(d.getTime() - offset).toISOString().split('T')[0];
+      }
+
+      document.getElementById('startDate').value = toLocalISO(start);
+      document.getElementById('endDate').value = toLocalISO(end);
+      
+      loadData();
+    }
+
+    // --- Group Logic ---
+    function toggleGroup(group) {
+      if (group === 'All') {
+        selectedGroups.clear();
+        selectedGroups.add('All');
+        selectedSubChannels.clear();
+      } else {
+        if (selectedGroups.has('All')) selectedGroups.delete('All');
+        
+        if (selectedGroups.has(group)) {
+          selectedGroups.delete(group);
+          if (channelConfig[group]) {
+            channelConfig[group].forEach(ch => selectedSubChannels.delete(ch));
+          }
+        } else {
+          selectedGroups.add(group);
+          if (channelConfig[group]) {
+            channelConfig[group].forEach(ch => selectedSubChannels.add(ch));
+          }
+        }
+
+        if (selectedGroups.size === 0) selectedGroups.add('All');
+      }
+
+      updateGroupUI();
+      renderSubChannels();
+      loadData();
+    }
+
+    function updateGroupUI() {
+      const map = { 'All': 'btn-All', '電商群組': 'btn-EC', '門市群組': 'btn-Retail', '經銷群組': 'btn-Dist', '其他群組': 'btn-Other' };
+      Object.keys(map).forEach(g => {
+        const btn = document.getElementById(map[g]);
+        if (selectedGroups.has(g)) btn.classList.add('active');
+        else btn.classList.remove('active');
+      });
+    }
+
+    function renderSubChannels() {
+      const container = document.getElementById('subChannelContainer');
+      container.innerHTML = '';
+      
+      if (selectedGroups.has('All')) return;
+
+      let channelsToRender = [];
+      selectedGroups.forEach(g => {
+        if (channelConfig[g]) channelsToRender = [...channelsToRender, ...channelConfig[g]];
+      });
+      channelsToRender.sort();
+
+      if (channelsToRender.length > 0) {
+        channelsToRender.forEach(ch => {
+          const isActive = selectedSubChannels.has(ch) ? 'active' : '';
+          container.innerHTML += `
+            <button onclick="toggleSubChannel('${ch}', this)" class="chip-btn ${isActive}">${ch}</button>
+          `;
+        });
+      }
+    }
+
+    function toggleSubChannel(ch, btn) {
+      if (selectedSubChannels.has(ch)) {
+        selectedSubChannels.delete(ch);
+        btn.classList.remove('active');
+      } else {
+        selectedSubChannels.add(ch);
+        btn.classList.add('active');
+      }
+      loadData();
+    }
+
+    // --- Data Fetching ---
+    function loadData() {
+      const s = document.getElementById('startDate').value;
+      const e = document.getElementById('endDate').value;
+      if(!s || !e) return;
+      
+      showLoading();
+      
+      const groupsArray = Array.from(selectedGroups);
+      let subsArray = [];
+      if (selectedGroups.has('All')) {
+        subsArray = ['All'];
+      } else {
+        subsArray = Array.from(selectedSubChannels);
+        if(subsArray.length === 0) subsArray = ['None']; 
+      }
+
+      google.script.run
+        .withSuccessHandler(renderDashboard)
+        .withFailureHandler(err => {
+          showLoadingError(err.message);
+        })
+        .getData(s, e, groupsArray, subsArray);
+    }
+
+    // --- Rendering ---
+    function renderDashboard(data) {
+      hideLoading();
+      
+      if(data.status === 'error') {
+        showLoadingError("後端錯誤: " + data.message);
+        return;
+      }
+
+      document.getElementById('updateTime').innerText = '更新時間: ' + new Date().toLocaleString();
+      document.getElementById('period-display').innerText = `${data.meta.start} ~ ${data.meta.end}`;
+
+      renderKPIs(data.kpi);
+      renderGroupHierarchy(data.groupSummary, data.kpi.rev);
+      renderAlerts(data.alerts);
+      
+      rawTrendData = data.trend;
+      
+      if (data.meta.dayDiff > 90) setTrendInterval('week');
+      else setTrendInterval('day');
+      
+      renderMatrixChart(data.matrix);
+      renderParetoChart(data.pareto);
+    }
+
+    function renderKPIs(kpi) {
+      const setVal = (id, val, pre='') => document.getElementById(id).innerText = pre + val.toLocaleString();
+      const setGrow = (id, val) => {
+        const el = document.getElementById(id);
+        const isPos = val >= 0;
+        const color = isPos ? 'text-emerald-500' : 'text-rose-500';
+        const arrow = isPos ? '▲' : '▼';
+        el.innerHTML = `<span class="${color} font-bold mr-1">${arrow} ${Math.abs(val).toFixed(1)}%</span> <span class="text-xs text-slate-400">vs 前期</span>`;
+      };
+      setVal('kpi-rev', kpi.rev, '$'); setGrow('kpi-rev-grow', kpi.rev_grow);
+      setVal('kpi-qty', kpi.qty); setGrow('kpi-qty-grow', kpi.qty_grow);
+      setVal('kpi-asp', kpi.asp, '$'); setGrow('kpi-asp-grow', kpi.asp_grow);
+    }
+
+    // --- 3-Level Table Logic ---
+    function renderGroupHierarchy(list, totalRev) {
+      const tbody = document.getElementById('groupSummaryBody');
+      tbody.innerHTML = '';
+      if(list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-slate-400">無符合資料</td></tr>';
+        return;
+      }
+
+      list.forEach((g, idx) => {
+        const gShare = totalRev > 0 ? (g.rev / totalRev * 100).toFixed(1) : 0;
+        const gId = `g-${idx}`;
+        
+        tbody.innerHTML += `
+          <tr class="row-group border-b border-slate-100" onclick="toggleRow('${gId}')">
+            <td class="px-4 py-3 font-bold text-slate-800">
+              <span id="icon-${gId}" class="chevron mr-2">▶</span> ${g.name}
+            </td>
+            <td class="px-4 py-3 text-right font-bold">$${g.rev.toLocaleString()}</td>
+            <td class="px-4 py-3 text-right">${g.qty.toLocaleString()}</td>
+            <td class="px-4 py-3 text-right text-slate-500">$${g.asp.toLocaleString()}</td>
+            <td class="px-4 py-3 text-center text-xs font-bold text-blue-600">${gShare}%</td>
+          </tr>
+        `;
+
+        g.subs.forEach((s, sIdx) => {
+          const sShare = g.rev > 0 ? (s.rev / g.rev * 100).toFixed(1) : 0;
+          const sId = `${gId}-s-${sIdx}`;
+          
+          tbody.innerHTML += `
+            <tr class="row-sub ${gId} border-b border-slate-100 text-sm" onclick="toggleRow('${sId}')">
+              <td class="px-4 py-2 indent-1 text-slate-600 font-medium">
+                <span id="icon-${sId}" class="chevron mr-2 text-slate-400">▶</span> ${s.name}
+              </td>
+              <td class="px-4 py-2 text-right">$${s.rev.toLocaleString()}</td>
+              <td class="px-4 py-2 text-right">${s.qty.toLocaleString()}</td>
+              <td class="px-4 py-2 text-right text-slate-400">$${s.asp.toLocaleString()}</td>
+              <td class="px-4 py-2 text-center text-xs text-slate-400">${sShare}%</td>
+            </tr>
+          `;
+
+          s.prods.forEach(p => {
+            tbody.innerHTML += `
+              <tr class="row-prod ${sId} border-b border-slate-50 text-xs bg-white">
+                <td class="px-4 py-1.5 indent-2 text-slate-500 font-mono">${p.code}</td>
+                <td class="px-4 py-1.5 text-right text-slate-500">$${p.rev.toLocaleString()}</td>
+                <td class="px-4 py-1.5 text-right font-bold text-slate-600">${p.qty}</td>
+                <td class="px-4 py-1.5 text-right text-slate-300">-</td>
+                <td class="px-4 py-1.5 text-right text-slate-300">-</td>
+              </tr>
+            `;
+          });
+        });
+      });
+    }
+
+    window.toggleRow = function(id) {
+      const rows = document.getElementsByClassName(id);
+      const icon = document.getElementById(`icon-${id}`);
+      
+      let isExpanding = false;
+      for(let row of rows) {
+        if(row.classList.contains('open')) {
+          row.classList.remove('open');
+        } else {
+          row.classList.add('open');
+          isExpanding = true;
+        }
+      }
+      if(icon) icon.style.transform = isExpanding ? 'rotate(90deg)' : 'rotate(0deg)';
+    }
+
+    function renderAlerts(alerts) {
+      const createItem = (item, type, label) => `
+        <div class="alert-item">
+          <div class="truncate mr-2 flex-1" title="${item.name}">
+            <span class="font-bold text-slate-700">${item.code}</span> 
+            <span class="text-slate-500 text-[10px]">${item.name}</span>
+          </div>
+          <div class="font-mono font-bold text-xs whitespace-nowrap ${type}">
+            ${label}
+          </div>
+        </div>
+      `;
+      const fill = (id, list, typeClass, formatter) => {
+        document.getElementById(id).innerHTML = list.length ? list.map(i => createItem(i, typeClass, formatter(i.val))).join('') : '<div class="text-xs text-slate-300 py-2 text-center">無異常</div>';
+      };
+      fill('alert-churn', alerts.churn, 'text-rose-600', v => `-$${v.toLocaleString()}`);
+      fill('alert-stockout', alerts.stockout, 'text-orange-600', v => `總銷: ${v}`);
+      fill('alert-profit', alerts.profit, 'text-yellow-600', v => `跌 ${v}%`);
+      fill('alert-potential', alerts.potential, 'text-blue-600', v => `$${v.toLocaleString()}`);
+    }
+
+    // --- Charts ---
+    function setTrendInterval(interval) {
+      document.querySelectorAll('.trend-toggle').forEach(b => {
+        b.classList.remove('bg-white', 'shadow-sm', 'text-blue-600');
+        b.classList.add('text-slate-400');
+      });
+      const activeBtn = document.getElementById(`trend-${interval}`);
+      if(activeBtn) {
+        activeBtn.classList.add('bg-white', 'shadow-sm', 'text-blue-600');
+        activeBtn.classList.remove('text-slate-400');
+      }
+      renderTrendChart(interval);
+    }
+
+    function renderTrendChart(interval) {
+      const ctx = document.getElementById('trendChart').getContext('2d');
+      if (chartInstances.trend) chartInstances.trend.destroy();
+
+      let labels = rawTrendData.labels;
+      let datasets = JSON.parse(JSON.stringify(rawTrendData.datasets));
+
+      if (interval !== 'day') {
+        const aggMap = new Map();
+        const periodLabels = [];
+        labels.forEach((dateStr, idx) => {
+          const d = new Date(dateStr);
+          let key = '';
+          if (interval === 'week') {
+             const day = d.getDay();
+             const diff = d.getDate() - day + (day == 0 ? -6 : 1); 
+             const monday = new Date(d.setDate(diff));
+             key = monday.toISOString().split('T')[0];
+          } else {
+             key = dateStr.slice(0, 7);
+          }
+          if (!aggMap.has(key)) { aggMap.set(key, {}); periodLabels.push(key); }
+          datasets.forEach(ds => {
+            if (!aggMap.get(key)[ds.label]) aggMap.get(key)[ds.label] = 0;
+            aggMap.get(key)[ds.label] += ds.data[idx];
+          });
+        });
+        labels = periodLabels.sort();
+        datasets.forEach(ds => { ds.data = labels.map(l => aggMap.get(l)[ds.label] || 0); });
+      }
+
+      const colors = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#64748b'];
+      chartInstances.trend = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: datasets.map((ds, i) => ({
+            label: ds.label,
+            data: ds.data,
+            borderColor: colors[i % colors.length],
+            backgroundColor: colors[i % colors.length] + '20',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 4
+          }))
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'top', align: 'end', labels: { boxWidth: 10, usePointStyle: true, font: {size: 10} } },
+            datalabels: { display: false }
+          },
+          scales: {
+            x: { grid: { display: false }, ticks: { maxTicksLimit: 8, font: {size: 10} } },
+            y: { stacked: true, grid: { borderDash: [2, 4] }, beginAtZero: true, ticks: {font: {size: 10}} }
+          }
+        }
+      });
+    }
+
+    function renderMatrixChart(data) {
+      const ctx = document.getElementById('matrixChart').getContext('2d');
+      if (chartInstances.matrix) chartInstances.matrix.destroy();
+
+      const sortedByRev = [...data].sort((a,b) => b.y - a.y);
+      const top10Threshold = sortedByRev.length > 10 ? sortedByRev[9].y : 0;
+      const maxQty = Math.max(...data.map(d => d.r)) || 1;
+
+      chartInstances.matrix = new Chart(ctx, {
+        type: 'bubble',
+        data: {
+          datasets: [{
+            label: 'Products',
+            data: data.map(d => ({
+              x: d.x,
+              y: d.y,
+              r: Math.max(3, (d.r / maxQty) * 25), 
+              ...d
+            })),
+            backgroundColor: data.map(d => d.x >= 0 ? 'rgba(16, 185, 129, 0.6)' : 'rgba(239, 68, 68, 0.6)'),
+            borderColor: data.map(d => d.x >= 0 ? '#059669' : '#b91c1c'),
+            borderWidth: 1
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => `${ctx.raw.fullName} | 營收:$${ctx.raw.y.toLocaleString()} | 成長:${ctx.raw.x}%`
+              }
+            },
+            datalabels: {
+              align: 'top',
+              offset: 2,
+              font: { size: 9, weight: 'bold' },
+              color: '#475569',
+              formatter: (v) => (v.y >= top10Threshold || Math.abs(v.x) > 50) ? v.label : null
+            }
+          },
+          scales: {
+            x: { 
+              title: { display: true, text: 'MoM 成長率 (%)' },
+              grid: { color: (c) => c.tick.value === 0 ? '#94a3b8' : '#e2e8f0', lineWidth: (c) => c.tick.value === 0 ? 2 : 1 }
+            },
+            y: { 
+              title: { display: true, text: '總營收 ($)' },
+              beginAtZero: true 
+            }
+          }
+        }
+      });
+    }
+
+    function renderParetoChart(data) {
+      const ctx = document.getElementById('paretoChart').getContext('2d');
+      if (chartInstances.pareto) chartInstances.pareto.destroy();
+
+      chartInstances.pareto = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: data.labels,
+          datasets: [
+            {
+              type: 'line',
+              label: '累積佔比 (%)',
+              data: data.cumulative,
+              borderColor: '#f59e0b',
+              borderWidth: 2,
+              yAxisID: 'y1',
+              tension: 0.1,
+              pointRadius: 0,
+              hitRadius: 10
+            },
+            {
+              type: 'bar',
+              label: '產品營收',
+              data: data.revs,
+              backgroundColor: '#3b82f6',
+              yAxisID: 'y',
+              borderRadius: 3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'top', align: 'end', labels: { boxWidth: 10, usePointStyle: true, font: {size: 10} } },
+            datalabels: { display: false },
+            tooltip: { mode: 'index', intersect: false }
+          },
+          scales: {
+            y: { beginAtZero: true, grid: { display: false }, ticks: { display: false } },
+            y1: { 
+              position: 'right', 
+              min: 0, max: 100, 
+              grid: { borderDash: [2, 4] },
+              ticks: { callback: v => v + '%', stepSize: 20, font: {size: 10} }
+            },
+            x: { ticks: { autoSkip: false, maxRotation: 45, minRotation: 45, font: { size: 9 } }, grid: {display: false} }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
